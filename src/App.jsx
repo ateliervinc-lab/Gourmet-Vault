@@ -9,14 +9,16 @@ import {
 
 // Firebase Core & Auth Imports
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
+import { 
+  getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, 
+  signInWithPopup, GoogleAuthProvider, signOut, linkWithPopup 
+} from 'firebase/auth';
 import { getFirestore, doc, setDoc, deleteDoc, collection, onSnapshot } from 'firebase/firestore';
 
 // Initialize Firebase (Supports both Canvas & Vercel)
 const firebaseConfig = typeof __firebase_config !== 'undefined' 
   ? JSON.parse(__firebase_config) 
   : {
-      // TODO: 部署到 Vercel 時，將你的 Firebase 專案設定填入這裡
       apiKey: "AIzaSyA9Yfvw3CcEP6RM4nYnqJEpbf0SyBUtpyY",
       authDomain: "gourmetvault-d0042.firebaseapp.com",
       projectId: "gourmetvault-d0042",
@@ -542,42 +544,23 @@ const MULTILINGUAL_DICT = {
   'bread': { zh: '麵包', en: 'Bread', ja: 'パン', ko: '빵', th: 'ขนมปัง' }
 };
 
-// 🌟 新增：外部翻譯 API 調用封裝函數 (模擬)
-// 在實際生產環境中，建議將此請求放在後端伺服器進行，避免 API Key 在前端洩漏。
 const callExternalTranslationAPI = async (text, targetLang) => {
-  // 這裡填入你的真實 API Key (如 Google Translate, DeepL 等)
   const API_KEY = "YOUR_EXTERNAL_API_KEY"; 
   
   try {
-    /* =========================================
-    🔥 真實 API 調用寫法範例 (以 Google Translate API 為例)
-    =========================================
-    const url = `https://translation.googleapis.com/language/translate/v2?key=${API_KEY}`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ q: text, target: targetLang })
-    });
-    const data = await response.json();
-    return data.data.translations[0].translatedText;
-    */
-
-    // 這裡我們用 Promise 模擬真實網路請求的延遲，並在找不到字典時回傳帶有標記的假翻譯
     return new Promise((resolve) => {
       setTimeout(() => {
         const lowerInput = text.trim().toLowerCase();
         if (MULTILINGUAL_DICT[lowerInput]) {
           resolve(MULTILINGUAL_DICT[lowerInput][targetLang]);
         } else {
-          // 模擬 API 翻譯了未知詞彙
           resolve(`[API翻譯] ${text}`); 
         }
-      }, 800); // 模擬 800ms 的網路延遲
+      }, 800);
     });
-
   } catch (error) {
     console.error("External API Error:", error);
-    return text; // 發生錯誤時退回原文
+    return text;
   }
 };
 
@@ -586,29 +569,24 @@ export default function App() {
   const [theme, setTheme] = useState('system'); 
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [activeTab, setActiveTab] = useState('home');
-  const [recipes, setRecipes] = useState([]); // 預設改為空，由 Firebase 載入
+  const [recipes, setRecipes] = useState([]);
   const [selectedRecipe, setSelectedRecipe] = useState(null);
   
-  // Custom Dynamic Pantry System
-  const [pantryStock, setPantryStock] = useState([]); // 預設改為空，由 Firebase 載入
+  const [pantryStock, setPantryStock] = useState([]);
   
-  // Custom ingredient builder inputs
   const [customItemName, setCustomItemName] = useState('');
   const [customItemEmoji, setCustomItemEmoji] = useState('🥦');
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
   const [pantryFilter, setPantryFilter] = useState('');
 
-  // Search state for recipes
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState('All');
 
-  // URL Parsing imports (Mock AI functionality)
   const [quickImportUrl, setQuickImportUrl] = useState('');
   const [isImporting, setIsImporting] = useState(false);
   const [toast, setToast] = useState(null);
 
-  // --- Firebase Auth & User State ---
   const [user, setUser] = useState(null);
 
   useEffect(() => {
@@ -617,7 +595,7 @@ export default function App() {
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
           await signInWithCustomToken(auth, __initial_auth_token);
         } else if (!auth.currentUser) {
-          await signInAnonymously(auth); // Vercel 初始訪客模式
+          await signInAnonymously(auth);
         }
       } catch (error) {
         console.error("Auth init error:", error);
@@ -631,15 +609,12 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // --- Firestore Realtime Sync ---
   useEffect(() => {
     if (!user) return;
 
-    // 1. 同步食譜 (Recipes)
     const recipesRef = collection(db, 'artifacts', appId, 'users', user.uid, 'recipes');
     const unsubRecipes = onSnapshot(recipesRef, (snapshot) => {
       if (snapshot.empty) {
-        // 初次登入，寫入預設食譜
         initialRecipes.forEach(async (recipe) => {
           await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'recipes', recipe.id), recipe);
         });
@@ -650,11 +625,9 @@ export default function App() {
       }
     }, (error) => console.error("Recipes fetch error:", error));
 
-    // 2. 同步冰箱食材 (Pantry)
     const pantryRef = collection(db, 'artifacts', appId, 'users', user.uid, 'pantry');
     const unsubPantry = onSnapshot(pantryRef, (snapshot) => {
       if (snapshot.empty) {
-        // 初次登入，寫入預設冰箱食材
         DEFAULT_PANTRY_STOCK.forEach(async (item) => {
           await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'pantry', item.key), item);
         });
@@ -671,22 +644,34 @@ export default function App() {
     };
   }, [user]);
 
-  // --- Google Login Handlers ---
+  // 優化後的 Google 登入機制，能保護並綁定訪客資料
   const handleGoogleLogin = async () => {
     const provider = new GoogleAuthProvider();
     try {
-      await signInWithPopup(auth, provider);
-      showToast("成功使用 Google 帳號登入並同步！");
+      if (user && user.isAnonymous) {
+        // 如果當前是訪客，則將帳號「升級」綁定，保留所有本機資料
+        await linkWithPopup(user, provider);
+        showToast("成功綁定 Google 帳號，您的資料已永久保存！");
+      } else {
+        await signInWithPopup(auth, provider);
+        showToast("成功使用 Google 帳號登入並同步！");
+      }
     } catch (error) {
       console.error("Login failed", error);
-      showToast("登入取消或失敗：" + error.message);
+      if (error.code === 'auth/credential-already-in-use') {
+        // 若此 Google 帳號已註冊過，退回一般登入
+        await signInWithPopup(auth, provider);
+        showToast("已切換至您現有的 Google 帳號。");
+      } else {
+        showToast("登入取消或失敗：" + error.message);
+      }
     }
   };
 
   const handleLogout = async () => {
     await signOut(auth);
     showToast("已登出，切換回訪客模式");
-    await signInAnonymously(auth); // 回退至訪客模式
+    await signInAnonymously(auth);
   };
 
   const t = translations[lang];
@@ -748,7 +733,7 @@ export default function App() {
       }
 
       const newImportedRecipe = {
-        id: String(Date.now()), // 改用 Timestamp 確保唯一性
+        id: String(Date.now()),
         title: mockTitle,
         image: mockImage,
         prepTime: '15m',
@@ -789,7 +774,6 @@ export default function App() {
         nutrition: { calories: 450, protein: 32, carbs: 8, fat: 28 }
       };
 
-      // 寫入 Firebase
       if (user) {
         setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'recipes', newImportedRecipe.id), newImportedRecipe);
       }
@@ -806,14 +790,12 @@ export default function App() {
     if (exists) {
       await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'pantry', key));
     } else {
-      // Find preset database details or make new entry
       const lexiconMatch = INGREDIENT_LEXICON[key];
       const emoji = lexiconMatch ? lexiconMatch.emoji : '📦';
       await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'pantry', key), { key, emoji });
     }
   };
 
-  // 🌟 更新：將此函數改為 async/await 結構以處理外部 API
   const handleAddCustomIngredient = async (e) => {
     e.preventDefault();
     if (!customItemName.trim()) return;
@@ -823,7 +805,6 @@ export default function App() {
     const sourceText = customItemName.trim();
     
     try {
-      // 模擬同時呼叫 API 翻譯成 5 種語言 (Promise.all 提升效率)
       const [zh, en, ja, ko, th] = await Promise.all([
         callExternalTranslationAPI(sourceText, 'zh'),
         callExternalTranslationAPI(sourceText, 'en'),
@@ -834,7 +815,6 @@ export default function App() {
 
       const translatedData = { zh, en, ja, ko, th };
       
-      // 判斷是否為真實字典裡的詞或 API 翻譯的詞
       const lowerInput = sourceText.toLowerCase();
       if (!MULTILINGUAL_DICT[lowerInput]) {
         showToast(`已透過外部 API 翻譯並新增 "${sourceText}"`);
@@ -847,7 +827,6 @@ export default function App() {
         ...translatedData
       };
 
-      // 寫入 Firebase
       if (user) {
         await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'pantry', customKey), { key: customKey, emoji: customItemEmoji });
       }
@@ -916,13 +895,11 @@ export default function App() {
   return (
     <div className="min-h-screen font-sans antialiased text-zinc-900 dark:text-zinc-100 transition-colors duration-500 bg-stone-100/50 dark:bg-zinc-950/80 selection:bg-zinc-900/10 selection:dark:bg-white/10 relative overflow-x-hidden">
       
-      {/* Dynamic iOS Abstract Blurry Background Gradients */}
       <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden">
         <div className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] rounded-full bg-gradient-to-tr from-amber-200/20 to-rose-200/20 dark:from-amber-900/10 dark:to-rose-900/10 blur-[120px]" />
         <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-gradient-to-br from-emerald-200/20 to-sky-200/20 dark:from-emerald-950/10 dark:to-sky-950/10 blur-[130px]" />
       </div>
 
-      {/* Elegant Toast Alert Overlay */}
       {toast && (
         <div className="fixed top-8 left-1/2 -translate-x-1/2 z-50 w-11/12 max-w-md bg-white/70 dark:bg-zinc-900/85 backdrop-blur-2xl text-zinc-800 dark:text-zinc-100 px-6 py-4 rounded-[22px] shadow-2xl flex items-center gap-3 border border-white/40 dark:border-zinc-800/60 animate-slide-up">
           <div className="w-8 h-8 rounded-full bg-zinc-900/5 dark:bg-white/10 flex items-center justify-center">
@@ -936,11 +913,8 @@ export default function App() {
       )}
 
       <div className="flex min-h-screen">
-        
-        {}
         <aside className="hidden md:flex flex-col w-[260px] shrink-0 border-r border-white/30 dark:border-zinc-900/40 bg-white/40 dark:bg-zinc-950/45 backdrop-blur-2xl p-7 justify-between sticky top-0 h-screen z-30">
           <div className="space-y-9">
-            {/* Elegant Minimal Logo */}
             <div className="flex items-center gap-3 py-1">
               <div className="w-10 h-10 bg-gradient-to-tr from-zinc-900 to-zinc-700 dark:from-white dark:to-zinc-300 rounded-2xl flex items-center justify-center text-white dark:text-zinc-950 shadow-lg relative overflow-hidden shrink-0">
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 13.87A4 4 0 0 1 7.41 6a5.11 5.11 0 0 1 1.05-1.54 5 5 0 0 1 7.08 0A5.11 5.11 0 0 1 16.59 6 4 4 0 0 1 18 13.87V21H6Z"/><line x1="6" y1="17" x2="18" y2="17"/></svg>
@@ -951,7 +925,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Premium Navigation */}
             <nav className="space-y-1">
               {[
                 { id: 'home', icon: Home, label: t.home },
@@ -982,7 +955,6 @@ export default function App() {
             </nav>
           </div>
 
-          {/* User profile footer info */}
           <div className="space-y-4 pt-6 border-t border-zinc-200/40 dark:border-zinc-800/40">
             <button 
               onClick={user && !user.isAnonymous ? handleLogout : handleGoogleLogin}
@@ -1001,14 +973,13 @@ export default function App() {
                   {user && !user.isAnonymous ? user.displayName || 'Google 用戶' : 'Cloud Sync Center'}
                 </p>
                 <p className={`text-[9px] uppercase tracking-wider font-black truncate ${user && !user.isAnonymous ? 'text-emerald-500' : 'text-amber-500'}`}>
-                  {user && !user.isAnonymous ? '已連線並同步' : '點擊登入 Google'}
+                  {user && !user.isAnonymous ? '已連線並同步' : '點擊綁定 Google'}
                 </p>
               </div>
             </button>
           </div>
         </aside>
 
-        {}
         <main className="flex-1 overflow-y-auto px-4 sm:px-8 py-8 pb-32 md:pb-8 transition-all max-w-6xl mx-auto w-full z-10">
           
           <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-9">
@@ -1032,11 +1003,9 @@ export default function App() {
             </div>
           </header>
 
-          {}
           {activeTab === 'home' && (
             <div className="space-y-8 animate-fade-in">
               
-              {/* Home Integrated AI Parser Bar */}
               <div className="bg-white/40 dark:bg-zinc-900/40 border border-white/50 dark:border-zinc-800/40 rounded-[28px] p-6 shadow-xl backdrop-blur-2xl">
                 <div className="flex items-start gap-4">
                   <div className="p-3.5 rounded-2xl bg-zinc-950/5 dark:bg-white/10 text-zinc-800 dark:text-zinc-200 shrink-0">
@@ -1074,14 +1043,12 @@ export default function App() {
                 </form>
               </div>
 
-              {/* Categorization & Filter Area */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-zinc-400">
                     <Filter size={12} />
                     <span className="text-[9px] font-black uppercase tracking-widest">{t.categories}</span>
                   </div>
-                  {/* Web micro-search integrated next to categorization */}
                   <div className="relative w-full max-w-xs hidden sm:block">
                     <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" size={12} />
                     <input 
@@ -1094,7 +1061,6 @@ export default function App() {
                   </div>
                 </div>
                 
-                {/* Micro Search Input (Always visible on mobile) */}
                 <div className="relative w-full sm:hidden">
                   <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" size={13} />
                   <input 
@@ -1123,7 +1089,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Recipes Grid */}
               <div className="grid gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
                 {filteredRecipes.map(recipe => {
                   const { matchRate, missing } = getRecipeMatchDetails(recipe);
@@ -1195,11 +1160,9 @@ export default function App() {
             </div>
           )}
 
-          {}
           {activeTab === 'pantry' && (
             <div className="max-w-3xl mx-auto space-y-8 animate-fade-in">
               
-              {/* Dynamic Interactive Stock Management Drawer */}
               <div className="bg-white/40 dark:bg-zinc-900/40 border border-white/50 dark:border-zinc-800/40 rounded-[28px] p-6 shadow-xl backdrop-blur-2xl space-y-6">
                 
                 <div className="flex gap-4 items-start">
@@ -1212,14 +1175,12 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Sub-module: Add custom ingredient with Emoji selector */}
                 <div className="pt-4 border-t border-zinc-200/40 dark:border-zinc-800/40 space-y-3">
                   <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400 block">{t.addCustomIngredient}</span>
                   
                   <form onSubmit={handleAddCustomIngredient} className="flex flex-col sm:flex-row gap-3">
                     <div className="flex items-center gap-2 bg-white/50 dark:bg-zinc-950/40 border border-white/20 dark:border-zinc-800/30 rounded-2xl px-3 py-1.5 flex-1 shadow-inner relative">
                       
-                      {/* Emoji Selector Trigger Button */}
                       <button 
                         type="button"
                         onClick={() => setIsEmojiPickerOpen(!isEmojiPickerOpen)}
@@ -1237,7 +1198,6 @@ export default function App() {
                         className="flex-1 bg-transparent text-xs outline-none text-zinc-900 dark:text-white placeholder:text-zinc-400"
                       />
 
-                      {/* Floating Emoji Selector Keypad (iOS style overlay) */}
                       {isEmojiPickerOpen && (
                         <div className="absolute left-0 sm:left-3 top-14 z-20 w-[280px] max-h-64 overflow-y-auto no-scrollbar bg-white/95 dark:bg-zinc-900/95 backdrop-blur-3xl border border-zinc-200/50 dark:border-zinc-800/50 rounded-2xl p-4 shadow-2xl grid grid-cols-6 gap-2 animate-slide-up">
                           {ALL_FOOD_EMOJIS.map(emoji => (
@@ -1267,11 +1227,9 @@ export default function App() {
                   </form>
                 </div>
 
-                {/* Multilingual presets database selection catalog */}
                 <div className="space-y-3">
                   <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400 block">{t.pantryInputLabel}</span>
                   
-                  {/* Preset catalog with dynamic translation map */}
                   <div className="flex flex-wrap gap-2.5">
                     {Object.keys(INGREDIENT_LEXICON).map((key) => {
                       const ingredientDetails = INGREDIENT_LEXICON[key];
@@ -1298,7 +1256,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Dynamic stock filter & visual listing */}
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <h3 className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
@@ -1314,7 +1271,6 @@ export default function App() {
                   )}
                 </div>
 
-                {/* Grid for dynamic pantry stock elements */}
                 {pantryStock.length === 0 ? (
                   <div className="bg-white/20 dark:bg-zinc-900/10 border border-white/10 dark:border-zinc-800/10 rounded-3xl p-8 text-center text-zinc-400">
                     <p className="text-xs font-semibold">冰箱空空的，點選上方食材或新增自訂食材吧！</p>
@@ -1347,7 +1303,6 @@ export default function App() {
                 )}
               </div>
 
-              {/* Pantry recommendation system (AI matched food recommendations list) */}
               <div className="space-y-4 pt-6 border-t border-zinc-200/30 dark:border-zinc-800/30">
                 <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">
                   智能配菜推薦 ({recipes.length})
@@ -1414,7 +1369,6 @@ export default function App() {
             </div>
           )}
 
-          {}
           {activeTab === 'add' && (
             <div className="max-w-md mx-auto animate-fade-in">
               <div className="bg-white/40 dark:bg-zinc-900/40 border border-white/50 dark:border-zinc-800/40 rounded-[28px] p-6 space-y-6 backdrop-blur-md shadow-xl">
@@ -1475,7 +1429,6 @@ export default function App() {
             </div>
           )}
 
-          {}
           {activeTab === 'settings' && (
             <div className="max-w-md mx-auto animate-fade-in">
               <div className="bg-white/40 dark:bg-zinc-900/40 border border-white/50 dark:border-zinc-800/40 rounded-[28px] p-6 space-y-6 backdrop-blur-md shadow-xl">
@@ -1544,7 +1497,6 @@ export default function App() {
         </main>
       </div>
 
-      {}
       {selectedRecipe && (
         <ImmersiveRecipeReader 
           recipe={selectedRecipe} 
@@ -1554,7 +1506,6 @@ export default function App() {
         />
       )}
 
-      {/* Mobile iOS Style Navigation Dock (Shown only on mobile view) */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 px-6 pb-6 pt-2 bg-gradient-to-t from-stone-100/90 via-stone-100/80 to-transparent dark:from-zinc-950 dark:via-zinc-950/90 pointer-events-none">
         <div className="max-w-md mx-auto bg-white/70 dark:bg-zinc-900/80 backdrop-blur-2xl rounded-full px-6 py-3.5 flex justify-between items-center shadow-2xl pointer-events-auto border border-white/40 dark:border-zinc-800/60">
           {[
@@ -1611,22 +1562,17 @@ export default function App() {
 }
 
 function ImmersiveRecipeReader({ recipe, onClose, t, lang }) {
-  // Unit system state: 'metric' | 'imperial'
   const [unitSystem, setUnitSystem] = useState('metric');
   
-  // Custom Dynamic Scaling Factor
-  // Calculated dynamically by changing either 'servings' or any single ingredient quantity.
   const [scale, setScale] = useState(1.0);
-  const [scalingSource, setScalingSource] = useState(null); // Keeps track of what triggered the scale (servings or specific ingredient)
+  const [scalingSource, setScalingSource] = useState(null); 
 
-  // 添加獨立狀態，解決刪除數字時的「輸入框凍結 (Frozen Input)」Bug
   const [activeInputKey, setActiveInputKey] = useState(null);
   const [activeInputValue, setActiveInputValue] = useState('');
 
   const [isTranslated, setIsTranslated] = useState(false);
   const [completedSteps, setCompletedSteps] = useState([]);
 
-  // Calculate scaled Servings
   const currentServings = Math.round(recipe.baseServings * scale * 10) / 10;
   const titleText = recipe.title[lang] || recipe.title['en'];
 
@@ -1640,11 +1586,10 @@ function ImmersiveRecipeReader({ recipe, onClose, t, lang }) {
     );
   };
 
-  // Triggered when manual Servings change
   const handleServingsChange = (newServings) => {
     const nextScale = newServings / recipe.baseServings;
     setScale(nextScale);
-    setScalingSource(null); // clear specific ingredient lock
+    setScalingSource(null); 
   };
 
   const resetAllScales = () => {
@@ -1657,12 +1602,10 @@ function ImmersiveRecipeReader({ recipe, onClose, t, lang }) {
     const scaledAmount = amount * scale;
     if (unitSystem === 'imperial') {
       if (unit === 'g') {
-        // Convert g to oz (ounces)
         const ozValue = scaledAmount * 0.035274;
         return { amount: parseFloat(ozValue.toFixed(1)), unit: 'oz' };
       }
       if (unit === 'ml') {
-        // Convert ml to fl oz (fluid ounces)
         const flOzValue = scaledAmount * 0.033814;
         return { amount: parseFloat(flOzValue.toFixed(1)), unit: 'fl oz' };
       }
@@ -1673,15 +1616,12 @@ function ImmersiveRecipeReader({ recipe, onClose, t, lang }) {
   return (
     <div className="fixed inset-0 z-50 bg-stone-100/80 dark:bg-zinc-950/90 backdrop-blur-3xl overflow-y-auto animate-fade-in font-sans">
       
-      {/* Immersive centered iOS layout with frosted glass controls */}
       <div className="max-w-3xl mx-auto min-h-screen flex flex-col bg-white/50 dark:bg-zinc-900/60 backdrop-blur-2xl shadow-2xl border-x border-white/20 dark:border-zinc-800/30 pb-24">
         
-        {/* Stunning wide hero image banner */}
         <div className="relative h-[42vh] min-h-[300px] w-full overflow-hidden">
           <img src={recipe.image} alt={titleText} className="w-full h-full object-cover" />
           <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/40 to-black/10"></div>
           
-          {/* Top navigation row inside overlay */}
           <div className="absolute top-6 left-6 right-6 flex justify-between items-center z-10">
             <button 
               onClick={onClose}
@@ -1710,10 +1650,8 @@ function ImmersiveRecipeReader({ recipe, onClose, t, lang }) {
           </div>
         </div>
 
-        {/* Content Container (Centralised reading view) */}
         <div className="p-6 md:p-10 space-y-8 max-w-2xl mx-auto w-full">
           
-          {/* Dynamic Scaling Indicator Notice banner */}
           {scalingSource && (
             <div className="bg-white/40 dark:bg-zinc-950/30 border border-white/40 dark:border-zinc-800/20 p-4 rounded-[22px] flex items-center justify-between text-xs animate-fade-in backdrop-blur-lg">
               <div className="flex items-center gap-2 text-zinc-600 dark:text-zinc-300">
@@ -1736,9 +1674,7 @@ function ImmersiveRecipeReader({ recipe, onClose, t, lang }) {
             </div>
           )}
 
-          {/* Core Interactive controls panel (Language + Unit selection) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-4 border-b border-zinc-200/30 dark:border-zinc-800/30">
-            {/* AI Translate button */}
             <button 
               onClick={handleTranslate} 
               className="flex items-center justify-between p-4 rounded-2xl border border-white/40 dark:border-zinc-800/30 bg-white/30 dark:bg-zinc-900/30 hover:bg-white/50 dark:hover:bg-zinc-900/50 transition-all text-xs font-bold uppercase tracking-wider"
@@ -1752,7 +1688,6 @@ function ImmersiveRecipeReader({ recipe, onClose, t, lang }) {
               </span>
             </button>
 
-            {/* Metric/Imperial Unit converter toggler */}
             <div className="flex items-center justify-between p-4 rounded-2xl border border-white/40 dark:border-zinc-800/30 bg-white/30 dark:bg-zinc-900/30 text-xs font-bold uppercase tracking-wider">
               <span className="flex items-center gap-2">
                 <Scale size={15} />
@@ -1775,7 +1710,6 @@ function ImmersiveRecipeReader({ recipe, onClose, t, lang }) {
             </div>
           </div>
 
-          {/* Servings Configuration Module */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-6 p-5 bg-white/30 dark:bg-zinc-950/20 rounded-[24px] border border-white/20 dark:border-zinc-800/20">
             <div className="space-y-1">
               <span className="text-[9px] font-black text-zinc-400 uppercase tracking-widest">{t.servings} (動態比例縮放)</span>
@@ -1799,7 +1733,6 @@ function ImmersiveRecipeReader({ recipe, onClose, t, lang }) {
             </div>
           </div>
 
-          {/* Scientific Nutrition Chart */}
           <div className="bg-white/30 dark:bg-zinc-950/10 rounded-[24px] p-5 space-y-4 border border-white/20 dark:border-zinc-800/20">
             <div className="flex items-center gap-1.5 text-zinc-400">
               <Leaf size={14} />
@@ -1821,7 +1754,6 @@ function ImmersiveRecipeReader({ recipe, onClose, t, lang }) {
             </div>
           </div>
 
-          {}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-black text-zinc-400 uppercase tracking-widest">{t.ingredients} ({recipe.ingredients.length})</h3>
@@ -1833,9 +1765,7 @@ function ImmersiveRecipeReader({ recipe, onClose, t, lang }) {
                 const ingredientDetails = INGREDIENT_LEXICON[ing.key] || { emoji: '📦', zh: ing.key, en: ing.key, ja: ing.key, ko: ing.key, th: ing.key };
                 const localizedIngredientName = ingredientDetails[lang] || ingredientDetails['en'] || ing.key;
                 
-                // Convert units & scale appropriately
                 const formatted = formatQuantity(ing.baseAmount, ing.unit);
-                // The base amount in current unit system
                 const baseAmountInCurrentUnit = unitSystem === 'imperial' && ing.unit === 'g' 
                   ? ing.baseAmount * 0.035274 
                   : unitSystem === 'imperial' && ing.unit === 'ml' 
@@ -1854,7 +1784,6 @@ function ImmersiveRecipeReader({ recipe, onClose, t, lang }) {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      {/* UNIVERSAL EDITOR INPUT - Dynamic scaling anchor for every item */}
                       <div className="flex items-center bg-white dark:bg-zinc-950 px-3 py-1 rounded-xl border border-zinc-200 dark:border-zinc-800">
                         <input 
                           type="number"
@@ -1877,7 +1806,6 @@ function ImmersiveRecipeReader({ recipe, onClose, t, lang }) {
                               setScale(calculatedScale);
                               setScalingSource(ing.key);
                             } else if (val === '') {
-                              // 當用戶完全清空輸入框時，將比例歸 0 以允許重新輸入數字
                               setScale(0); 
                               setScalingSource(ing.key);
                             }
@@ -1893,7 +1821,6 @@ function ImmersiveRecipeReader({ recipe, onClose, t, lang }) {
             </div>
           </div>
 
-          {}
           <div className="space-y-4">
             <div className="flex items-center justify-between pb-2 border-b border-zinc-200/30 dark:border-zinc-800/30">
               <h3 className="text-xs font-black text-zinc-400 uppercase tracking-widest">{t.instructions}</h3>
