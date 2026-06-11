@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { 
   Home, Plus, Refrigerator, Settings, Moon, Sun, 
   Search, Utensils, Clock, Flame, ChevronLeft, 
-  Minus, Plus as PlusIcon, Check, Leaf,
-  Link2, Filter, AlertCircle, X, Trash2
+  Share2, Plus as PlusIcon, Leaf,
+  Link2, Filter, AlertCircle, X
 } from 'lucide-react';
 
 const initialRecipes = [
