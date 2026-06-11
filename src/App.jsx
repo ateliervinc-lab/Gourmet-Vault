@@ -4,7 +4,7 @@ import {
   Search, Utensils, Clock, Flame, Share2, Languages, 
   ChevronLeft, Minus, Plus as PlusIcon, Check, Leaf,
   Sparkles, Link2, Filter, AlertCircle, X, Scale, RefreshCw, 
-  Trash2, Smile, Layers, HelpCircle, Cloud, Loader2
+  Trash2, Layers, Cloud, Loader2
 } from 'lucide-react';
 
 // Firebase Core & Auth Imports
@@ -578,7 +578,6 @@ export default function App() {
   const [customItemEmoji, setCustomItemEmoji] = useState('🥦');
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
-  const [pantryFilter, setPantryFilter] = useState('');
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState('All');
