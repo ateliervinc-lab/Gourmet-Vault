@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { 
   Home, Plus, Refrigerator, Settings, Globe, Moon, Sun, 
   Search, Utensils, Clock, Flame, Share2, Languages, 
